@@ -8,6 +8,47 @@ This is a new agent built during the challenge, inspired by an older template-ba
 storytelling app. The older app was not an AI agent. Confirm eligibility with the
 organizers before entering a challenge that requires a previously built agent.
 
+## Architecture
+
+The Python CLI runs locally and calls Amazon Bedrock through the Boto3 Converse
+API. In `after` mode, the model can request a saved story; Python executes the
+read-only S3 tool and sends its result back to Bedrock.
+
+```mermaid
+flowchart TD
+    User["User in terminal"]
+    subgraph Local["Local machine"]
+        Agent["Python CLI: agent.py"]
+        Tool["get_previous_story / read_story"]
+    end
+    subgraph AWS["AWS account"]
+        Bedrock["Amazon Bedrock: selected model"]
+        S3[("Private S3 bucket: stories/*.txt")]
+    end
+    User -->|"Prompt and mode"| Agent
+    Agent -->|"Converse: prompt, context and optional tool schema"| Bedrock
+    Bedrock -->|"Answer or toolUse request"| Agent
+    Agent -->|"Validate and dispatch tool request in after mode"| Tool
+    Tool -->|"GetObject for validated story ID"| S3
+    S3 -->|"Previous chapter"| Tool
+    Tool -->|"Story data or retrieval error"| Agent
+    Agent -->|"Converse: matching toolResult"| Bedrock
+    Agent -->|"Print final answer"| User
+```
+
+- **Before mode:** calls Bedrock without a retrieval tool; S3 is not accessed.
+- **After mode:** exposes one tool. Bedrock chooses whether to request it;
+  the local Python process reads S3, rather than Bedrock accessing the bucket directly.
+- **Access:** the local AWS identity needs `bedrock:InvokeModel` and, for retrieval,
+  `s3:GetObject` restricted to the story prefix. See [Permissions](#permissions).
+- **Memory:** the saved chapter is uploaded separately. Generated continuations
+  are printed, not automatically saved back to S3.
+- **Execution limits:** at most four Converse calls per run, with up to 650 output
+  tokens requested per call.
+
+This diagram describes the implemented code path. Live AWS integration has not
+yet been verified; see the status above.
+
 ## Before and after
 
 Both modes use the same Bedrock model, system prompt and user request.
